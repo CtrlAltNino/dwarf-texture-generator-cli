@@ -1,5 +1,7 @@
 use clap::Parser;
 use clap_num::number_range;
+#[path = "algorithms/perlin.rs"]
+mod perlin;
 
 fn less_than_3(s: &str) -> Result<u8, String> {
     number_range(s, 0, 3)

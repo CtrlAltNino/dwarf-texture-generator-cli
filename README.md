@@ -10,6 +10,7 @@ Call Arguments:
 -resolution <RESOLUTION> (2-8192, with warning for non power of 2 sizes)
 -channels [r, rg, rgb, rgba]
 -bits_per_channel [8, 16, 32, 64]
+-seed
 
 OR:
 -file <FILE_PATH>
