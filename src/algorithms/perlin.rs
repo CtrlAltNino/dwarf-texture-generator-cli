@@ -1,23 +1,69 @@
+use image::ImageBuffer;
+use rand::{rngs::SmallRng, Rng, SeedableRng};
+
+use crate::chatpgt;
+
 #[derive(Debug)]
-pub struct PerlinParameters {
+pub struct Perlin {
     pub seed: u32,
     pub octaves: u32,
     pub persistence: f32,
     pub scale: f32,
 }
 
-pub fn perlin_2d(
-    x: u32,
-    y: u32,
-    params: PerlinParameters,
-) -> image::ImageBuffer<image::Rgb<u8>, Vec<u8>> {
-    let mut imgbuf = image::ImageBuffer::new(x, y);
+pub trait Noise {
+    fn generate(&self, x: u32, y: u32) -> image::ImageBuffer<image::Rgb<u8>, Vec<u8>>;
+}
 
-    for (x, y, pixel) in imgbuf.enumerate_pixels_mut() {
-        let r = (0.8 * x as f32) as u8;
-        let b = (0.3 * y as f32) as u8;
-        *pixel = image::Rgb([r, 0, b]);
+impl Perlin {
+    fn perlin_normed(&self, x: usize, y: usize) -> Vec<Vec<f64>> {
+        let mut array: Vec<Vec<f64>> = vec![vec![0.0; x]; y];
+        let ng = chatpgt::Noisegenerator::new();
+        for o in 0..self.octaves {
+            let ofactor = 2_i64.pow(o);
+            let freq = self.scale * (ofactor as f32);
+            let amplitude = 1.0 / ofactor as f64;
+            for (px, row) in array.iter_mut().enumerate() {
+                for (py, element) in row.iter_mut().enumerate() {
+                    let a = amplitude
+                        * ng.noise_2d((px as f32 * freq) as f64, (py as f32 * freq * 0.5) as f64);
+                    *element += a;
+                }
+            }
+        }
+        array
     }
+}
 
-    imgbuf
+impl Noise for Perlin {
+    fn generate(&self, x: u32, y: u32) -> image::ImageBuffer<image::Rgb<u8>, Vec<u8>> {
+        let mut imgbuf = image::ImageBuffer::new(x, y);
+        let generated_noise = self.perlin_normed(x as usize, y as usize);
+
+        for (px, py, pixel) in imgbuf.enumerate_pixels_mut() {
+            let a = ((generated_noise[px as usize][py as usize] + 1.0) * 0.5 * 255.0) as u8;
+            *pixel = image::Rgb([a, a, a]);
+        }
+
+        imgbuf
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn basic_case() {
+        let p = Perlin {
+            seed: 1,
+            octaves: 13,
+            persistence: 1.0,
+            scale: 0.001,
+        };
+
+        let r = p.generate(10, 10);
+
+        assert_eq!((10, 10), r.dimensions());
+    }
 }

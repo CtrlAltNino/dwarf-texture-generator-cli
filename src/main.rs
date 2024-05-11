@@ -1,11 +1,15 @@
 use clap::Parser;
 use clap_num::number_range;
 
+mod luatryout;
 mod algorithms {
     pub mod perlin;
 }
 
-use crate::algorithms::perlin;
+mod chatpgt;
+
+use crate::algorithms::perlin::Noise;
+use crate::algorithms::perlin::Perlin;
 
 fn less_than_3(s: &str) -> Result<u8, String> {
     number_range(s, 0, 3)
@@ -27,15 +31,17 @@ struct Cli {
 fn main() {
     let args = Cli::parse();
 
+    // luatryout::main().unwrap();
+
     println!("Hello, world! {:?}", args);
-    let x = perlin::PerlinParameters {
+    let x = Perlin {
         seed: 1,
-        scale: 1.0,
-        octaves: 1,
+        scale: 0.001,
+        octaves: 13,
         persistence: 1.0,
     };
 
-    let out = perlin::perlin_2d(800, 800, x);
+    let out = x.generate(1000, 1000);
 
     out.save(args.path.as_path()).unwrap();
 }
