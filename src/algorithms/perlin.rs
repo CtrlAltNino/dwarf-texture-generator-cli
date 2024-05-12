@@ -1,14 +1,19 @@
-use image::ImageBuffer;
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use clap::Args;
 
 use crate::chatpgt;
 
-#[derive(Debug)]
+#[derive(Debug, Args)]
 pub struct Perlin {
-    pub seed: u32,
-    pub octaves: u32,
-    pub persistence: f32,
-    pub scale: f32,
+    // #[arg(short, long)]
+    // seed: u32,
+    #[arg(short, long)]
+    octaves: u32,
+
+    #[arg(short, long)]
+    persistence: f32,
+
+    #[arg(short, long)]
+    scale: f32,
 }
 
 pub trait Noise {
@@ -18,7 +23,7 @@ pub trait Noise {
 impl Perlin {
     fn perlin_normed(&self, x: usize, y: usize) -> Vec<Vec<f64>> {
         let mut array: Vec<Vec<f64>> = vec![vec![0.0; x]; y];
-        let ng = chatpgt::Noisegenerator::new();
+        let mut ng = chatpgt::Noisegenerator::new();
         for o in 0..self.octaves {
             let ofactor = 2_i64.pow(o);
             let freq = self.scale * (ofactor as f32);
@@ -44,7 +49,6 @@ impl Noise for Perlin {
             let a = ((generated_noise[px as usize][py as usize] + 1.0) * 0.5 * 255.0) as u8;
             *pixel = image::Rgb([a, a, a]);
         }
-
         imgbuf
     }
 }
@@ -56,7 +60,6 @@ mod tests {
     #[test]
     fn basic_case() {
         let p = Perlin {
-            seed: 1,
             octaves: 13,
             persistence: 1.0,
             scale: 0.001,

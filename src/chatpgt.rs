@@ -70,7 +70,7 @@ impl Noisegenerator {
         }
     }
 
-    pub fn noise_2d(&self, x: f64, y: f64) -> f64 {
+    pub fn noise_2d(&mut self, x: f64, y: f64) -> f64 {
         let x_floor = x.floor() as usize & 255;
         let y_floor = y.floor() as usize & 255;
 
