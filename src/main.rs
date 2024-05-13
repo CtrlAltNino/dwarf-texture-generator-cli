@@ -78,7 +78,6 @@ fn post_process_cli_args(args: &mut crate::Cli) -> () {
 
 fn main() {
     let mut args = Cli::parse();
-
     post_process_cli_args(&mut args);
 
     // I dont like this repitition
@@ -87,14 +86,15 @@ fn main() {
         NoiseType::Constant(args) => args.generate(1000, 1000),
     };
 
-    let mut cursor = Cursor::new(Vec::new());
-
-    image
-        .write_to(&mut cursor, args.image_format.unwrap())
-        .unwrap();
-
-    io::stdout().write_all(&cursor.into_inner()).unwrap();
-    io::stdout().flush().unwrap();
+    if args.out.stdout {
+        output::spit_to_stdout(image, args.image_format.unwrap());
+    } else {
+        output::save_to_file(
+            image,
+            args.image_format.unwrap(),
+            args.out.path.unwrap().as_path(),
+        );
+    }
 }
 
 #[cfg(test)]

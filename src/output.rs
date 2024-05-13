@@ -1,4 +1,7 @@
-use std::io::ErrorKind;
+use std::{
+    io::{self, Cursor, ErrorKind, Write},
+    path::Path,
+};
 
 use image::ImageFormat;
 
@@ -34,4 +37,24 @@ pub fn infer_file_format(args: &mut crate::Cli) -> () {
             args.image_format = Some(ImageFormat::from_path(p).unwrap());
         }
     }
+}
+
+//TODO: implement error handling here?
+pub fn save_to_file(
+    image: image::ImageBuffer<image::Rgb<u8>, Vec<u8>>,
+    iformat: ImageFormat,
+    pth: &Path,
+) -> () {
+    image.save_with_format(pth, iformat);
+}
+
+pub fn spit_to_stdout(
+    image: image::ImageBuffer<image::Rgb<u8>, Vec<u8>>,
+    iformat: ImageFormat,
+) -> () {
+    let mut cursor = Cursor::new(Vec::new());
+
+    image.write_to(&mut cursor, iformat).unwrap();
+    io::stdout().write_all(&cursor.into_inner()).unwrap();
+    io::stdout().flush().unwrap();
 }
