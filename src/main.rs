@@ -1,16 +1,11 @@
 use clap::builder::ArgPredicate;
+use clap::ArgAction;
 use clap::Args;
-use clap::CommandFactory;
 use clap::Parser;
 use clap::Subcommand;
-use clap::ValueEnum;
 use clap_num::number_range;
+use image::ImageError;
 use image::ImageFormat;
-use std::fmt::format;
-use std::io::Cursor;
-use std::io::ErrorKind;
-use std::io::{self, Write};
-use std::path::PathBuf;
 
 mod luatryout;
 mod output;
@@ -34,12 +29,20 @@ fn less_than_3(s: &str) -> Result<u8, String> {
 }
 
 #[derive(Parser, Debug)]
+#[command(disable_help_flag = true)]
 struct Cli {
-    #[arg(short, long, value_parser=less_than_3, default_value_t=2)]
-    dimension: u8,
-    /// Path to the outputfile, image format is inffered from the filename (*.png, *.tff, ...)
+    // #[arg(short, long, value_parser=less_than_3, default_value_t=2)]
+    // dimension: u8,
     // #[arg(short, long)]
     // path: std::path::PathBuf,
+    #[arg(short, long, default_value_t = 1024)]
+    width: u32,
+
+    #[arg(short, long, default_value_t = 1024)]
+    height: u32,
+
+    #[arg(short = '?', long = "help", action = ArgAction::Help)]
+    holp: Option<bool>,
 
     /// help texto
     #[command(subcommand)]
@@ -56,6 +59,7 @@ struct Cli {
 #[derive(Args, Debug)]
 #[group(required = true, multiple = false)]
 struct Output {
+    /// Path to the outputfile, image format is inffered from the filename (*.png, *.tff, ...)
     #[arg(short, long)]
     path: Option<std::path::PathBuf>,
 
@@ -72,18 +76,19 @@ enum NoiseType {
     Constant(Constant),
 }
 
-fn post_process_cli_args(args: &mut crate::Cli) -> () {
-    output::infer_file_format(args);
+fn post_process_cli_args(args: &mut crate::Cli) -> Result<(), ImageError> {
+    output::infer_file_format(args)?;
+    Ok(())
 }
 
 fn main() {
     let mut args = Cli::parse();
-    post_process_cli_args(&mut args);
+    post_process_cli_args(&mut args).unwrap();
 
     // I dont like this repitition
     let image = match args.noise_type {
-        NoiseType::Perlin(args) => args.generate(1000, 1000),
-        NoiseType::Constant(args) => args.generate(1000, 1000),
+        NoiseType::Perlin(nargs) => nargs.generate(args.width, args.height),
+        NoiseType::Constant(nargs) => nargs.generate(args.width, args.height),
     };
 
     if args.out.stdout {

@@ -19,7 +19,7 @@ pub struct Perlin {
 
 impl Perlin {
     fn perlin_normed(&self, x: usize, y: usize) -> Vec<Vec<f64>> {
-        let mut array: Vec<Vec<f64>> = vec![vec![0.0; x]; y];
+        let mut array: Vec<Vec<f64>> = vec![vec![0.0; y]; x];
         let mut ng = chatpgt::Noisegenerator::new();
         for o in 0..self.octaves {
             let ofactor = 2_i64.pow(o);
@@ -28,7 +28,7 @@ impl Perlin {
             for (px, row) in array.iter_mut().enumerate() {
                 for (py, element) in row.iter_mut().enumerate() {
                     let a = amplitude
-                        * ng.noise_2d((px as f32 * freq) as f64, (py as f32 * freq * 0.5) as f64);
+                        * ng.noise_2d((px as f32 * freq) as f64, (py as f32 * freq) as f64);
                     *element += a;
                 }
             }
