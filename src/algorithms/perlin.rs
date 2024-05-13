@@ -1,5 +1,6 @@
 use clap::Args;
 
+use crate::algorithms::Noise;
 use crate::chatpgt;
 
 #[derive(Debug, Args)]
@@ -14,10 +15,6 @@ pub struct Perlin {
 
     #[arg(short, long)]
     scale: f32,
-}
-
-pub trait Noise {
-    fn generate(&self, x: u32, y: u32) -> image::ImageBuffer<image::Rgb<u8>, Vec<u8>>;
 }
 
 impl Perlin {

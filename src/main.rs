@@ -1,21 +1,33 @@
+use clap::builder::ArgPredicate;
 use clap::Args;
+use clap::CommandFactory;
 use clap::Parser;
 use clap::Subcommand;
 use clap::ValueEnum;
 use clap_num::number_range;
 use image::ImageFormat;
+use std::fmt::format;
 use std::io::Cursor;
+use std::io::ErrorKind;
 use std::io::{self, Write};
+use std::path::PathBuf;
 
 mod luatryout;
+mod output;
 mod algorithms {
+    pub mod constant;
     pub mod perlin;
+
+    pub trait Noise {
+        fn generate(&self, x: u32, y: u32) -> image::ImageBuffer<image::Rgb<u8>, Vec<u8>>;
+    }
 }
 
 mod chatpgt;
 
-use crate::algorithms::perlin::Noise;
+use crate::algorithms::constant::Constant;
 use crate::algorithms::perlin::Perlin;
+use crate::algorithms::*;
 
 fn less_than_3(s: &str) -> Result<u8, String> {
     number_range(s, 0, 3)
@@ -33,10 +45,12 @@ struct Cli {
     #[command(subcommand)]
     noise_type: NoiseType,
 
+    /// png, tif, ...
+    #[arg(short, long, value_parser = crate::output::parse_file_format, default_value = "png", default_value_if("path" , ArgPredicate::IsPresent,  None))]
+    image_format: Option<ImageFormat>,
+
     #[command(flatten)]
     out: Output,
-
-    image_format: Option<Imageformat>,
 }
 
 #[derive(Args, Debug)]
@@ -49,43 +63,80 @@ struct Output {
     stdout: bool,
 }
 
-#[derive(Args, Debug)]
-#[group(multiple = true, required = true)]
-struct StdoutRequirements {
-    #[arg(short, long)]
-    stdout: bool,
-
-    #[arg(short, long)]
-    imageformat: Imageformat,
-}
-
-#[derive(ValueEnum, Debug, Clone)]
-enum Imageformat {
-    png,
-    tff,
-}
-
 #[derive(Subcommand, Debug)]
 #[command(subcommand_value_name = "NOISETYPE")]
 #[command(subcommand_help_heading("Noise types"))]
 #[command(disable_help_subcommand = true)]
 enum NoiseType {
     Perlin(Perlin),
-    Voronoi,
+    Constant(Constant),
+}
+
+fn post_process_cli_args(args: &mut crate::Cli) -> () {
+    output::infer_file_format(args);
 }
 
 fn main() {
-    let args = Cli::parse();
+    let mut args = Cli::parse();
 
-    let x = match args.noise_type {
-        NoiseType::Perlin(args) => Some(args.generate(1000, 1000)),
-        _ => None,
+    post_process_cli_args(&mut args);
+
+    // I dont like this repitition
+    let image = match args.noise_type {
+        NoiseType::Perlin(args) => args.generate(1000, 1000),
+        NoiseType::Constant(args) => args.generate(1000, 1000),
     };
 
     let mut cursor = Cursor::new(Vec::new());
 
-    x.unwrap().write_to(&mut cursor, ImageFormat::Png).unwrap();
+    image
+        .write_to(&mut cursor, args.image_format.unwrap())
+        .unwrap();
 
     io::stdout().write_all(&cursor.into_inner()).unwrap();
     io::stdout().flush().unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+
+    use std::error::Error;
+
+    use super::*;
+
+    trait Testable {
+        fn run(cmd: &[&str]) -> Result<Self, clap::Error>
+        where
+            Self: Sized;
+    }
+
+    impl Testable for Cli {
+        fn run(cmd: &[&str]) -> Result<Self, clap::Error>
+        where
+            Self: Sized,
+        {
+            let mut r = Self::try_parse_from(cmd)?;
+            post_process_cli_args(&mut r);
+            Ok(r)
+        }
+    }
+
+    #[test]
+    fn inferred_image_format() -> Result<(), clap::Error> {
+        let r = Cli::run(&[
+            "",
+            "--path",
+            "test.png",
+            "perlin",
+            "--octaves",
+            "1",
+            "--scale",
+            "1",
+            "--persistence",
+            "1",
+        ])?;
+        assert_eq!(r.image_format, Some(ImageFormat::Png));
+
+        Ok(())
+    }
 }
