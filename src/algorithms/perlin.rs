@@ -11,26 +11,34 @@ pub struct Perlin {
     octaves: u32,
 
     #[arg(short, long)]
-    persistence: f32,
+    persistence: f64,
 
     #[arg(short, long)]
-    scale: f32,
+    scale: f64,
 }
 
 impl Perlin {
     fn perlin_normed(&self, x: usize, y: usize) -> Vec<Vec<f64>> {
         let mut array: Vec<Vec<f64>> = vec![vec![0.0; y]; x];
         let mut ng = chatpgt::Noisegenerator::new();
-        for o in 0..self.octaves {
-            let ofactor = 2_i64.pow(o);
-            let freq = self.scale * (ofactor as f32);
-            let amplitude = 1.0 / ofactor as f64;
-            for (px, row) in array.iter_mut().enumerate() {
-                for (py, element) in row.iter_mut().enumerate() {
-                    let a = amplitude
-                        * ng.noise_2d((px as f32 * freq) as f64, (py as f32 * freq) as f64);
-                    *element += a;
+        let max_val = (0..self.octaves).fold(0.0, |acc, x| acc + self.persistence.powf(x as f64));
+
+        // let amplitude = self.persistence.powf(o as f64);
+        for (px, row) in array.iter_mut().enumerate() {
+            for (py, element) in row.iter_mut().enumerate() {
+                let mut ofactor = 1.0;
+                let mut amplitude = 1.0;
+                for _ in 0..self.octaves {
+                    // let ofactor = 2_i64.pow(o);
+                    let freq = self.scale * (ofactor as f64);
+
+                    *element += amplitude * ng.noise_2d(px as f64 * freq, py as f64 * freq);
+
+                    //max_val += amplitude;
+                    amplitude *= self.persistence;
+                    ofactor *= 2.0;
                 }
+                *element /= max_val;
             }
         }
         array

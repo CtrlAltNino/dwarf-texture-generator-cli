@@ -31,7 +31,6 @@ pub fn parse_file_format(format_ext: &str) -> Result<ImageFormat, std::io::Error
 
 pub fn infer_file_format(args: &mut crate::Cli) -> Result<(), ImageError> {
     // LEARN: das & zeichen hier unten war geraten
-    //
     if let None = args.image_format {
         if let Some(p) = &args.out.path {
             args.image_format = Some(ImageFormat::from_path(p)?);
@@ -58,14 +57,7 @@ pub fn spit_to_stdout(
     let mut cursor = Cursor::new(Vec::new());
 
     image.write_to(&mut cursor, iformat).unwrap();
-
-    //
-    //
-    //
-    //
-    //
-    //
-    //
+    //TODO gracefully terminate here
     io::stdout().write_all(&cursor.into_inner()).unwrap();
     io::stdout().flush().unwrap();
 }

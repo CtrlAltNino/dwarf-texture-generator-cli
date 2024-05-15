@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use clap::builder::ArgPredicate;
 use clap::ArgAction;
 use clap::Args;
@@ -82,6 +84,7 @@ fn post_process_cli_args(args: &mut crate::Cli) -> Result<(), ImageError> {
 }
 
 fn main() {
+    let start = Instant::now();
     let mut args = Cli::parse();
     post_process_cli_args(&mut args).unwrap();
 
@@ -100,6 +103,10 @@ fn main() {
             args.out.path.unwrap().as_path(),
         );
     }
+
+    let duration = start.elapsed();
+
+    eprintln!("Time elapsed in expensive_function() is: {:?}", duration);
 }
 
 #[cfg(test)]
