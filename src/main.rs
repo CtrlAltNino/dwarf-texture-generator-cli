@@ -1,22 +1,26 @@
 use std::time::Instant;
 
+use algorithms::voronoi::Voronoi;
 use clap::builder::ArgPredicate;
 use clap::ArgAction;
 use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
 use clap_num::number_range;
+use image::buffer::ConvertBuffer;
 use image::ImageError;
 use image::ImageFormat;
 
+mod composition;
 mod luatryout;
 mod output;
 mod algorithms {
     pub mod constant;
     pub mod perlin;
+    pub mod voronoi;
 
     pub trait Noise {
-        fn generate(&self, x: u32, y: u32) -> image::ImageBuffer<image::Rgb<u8>, Vec<u8>>;
+        fn generate(&self, x: u32, y: u32) -> image::ImageBuffer<image::Rgb<f32>, Vec<f32>>;
     }
 }
 
@@ -76,6 +80,7 @@ struct Output {
 enum NoiseType {
     Perlin(Perlin),
     Constant(Constant),
+    Voronoi(Voronoi),
 }
 
 fn post_process_cli_args(args: &mut crate::Cli) -> Result<(), ImageError> {
@@ -89,23 +94,42 @@ fn main() {
     post_process_cli_args(&mut args).unwrap();
 
     // I dont like this repitition
-    let image = match args.noise_type {
+    let mut image = match args.noise_type {
         NoiseType::Perlin(nargs) => nargs.generate(args.width, args.height),
         NoiseType::Constant(nargs) => nargs.generate(args.width, args.height),
+        NoiseType::Voronoi(nargs) => nargs.generate(args.width, args.height),
     };
 
+    // let t = composition::color_gradient3();
+
+    let tttt = vec![
+        image::Rgb([0.0, 0.0, 0.0]),
+        image::Rgb([0.0, 0.0, 0.0]),
+        image::Rgb([1.0, 0.0, 0.0]),
+        image::Rgb([1.0, 1.0, 0.0]),
+        image::Rgb([1.0, 1.0, 1.0]),
+        image::Rgb([0.647, 0.0, 0.969]),
+    ];
+
+    let t = composition::build_gradient(&tttt);
+
+    for (px, py, pixel) in image.enumerate_pixels_mut() {
+        let image::Rgb([d, _, _]) = *pixel;
+        *pixel = t(d);
+    }
+
+    let u8image: image::RgbImage = image.convert();
+
     if args.out.stdout {
-        output::spit_to_stdout(image, args.image_format.unwrap());
+        output::spit_to_stdout(u8image, args.image_format.unwrap());
     } else {
         output::save_to_file(
-            image,
+            u8image,
             args.image_format.unwrap(),
             args.out.path.unwrap().as_path(),
         );
     }
-
     let duration = start.elapsed();
-
     eprintln!("Time elapsed in expensive_function() is: {:?}", duration);
 }
 

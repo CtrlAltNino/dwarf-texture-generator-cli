@@ -9,11 +9,11 @@ pub struct Constant {
 }
 
 impl Noise for Constant {
-    fn generate(&self, x: u32, y: u32) -> image::ImageBuffer<image::Rgb<u8>, Vec<u8>> {
+    fn generate(&self, x: u32, y: u32) -> image::ImageBuffer<image::Rgb<f32>, Vec<f32>> {
         let mut imgbuf = image::ImageBuffer::new(x, y);
 
         for (_px, _py, pixel) in imgbuf.enumerate_pixels_mut() {
-            *pixel = image::Rgb([100, 200, 50]);
+            *pixel = image::Rgb([0.1, 0.3, 0.8]);
         }
         imgbuf
     }

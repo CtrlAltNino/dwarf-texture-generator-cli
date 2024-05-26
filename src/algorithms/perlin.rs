@@ -45,13 +45,17 @@ impl Perlin {
     }
 }
 
+fn comp<T, U, V>(g: impl Fn(U) -> V, h: impl Fn(T) -> U) -> impl Fn(T) -> V {
+    move |x| g(h(x))
+}
+
 impl Noise for Perlin {
-    fn generate(&self, x: u32, y: u32) -> image::ImageBuffer<image::Rgb<u8>, Vec<u8>> {
+    fn generate(&self, x: u32, y: u32) -> image::ImageBuffer<image::Rgb<f32>, Vec<f32>> {
         let mut imgbuf = image::ImageBuffer::new(x, y);
         let generated_noise = self.perlin_normed(x as usize, y as usize);
 
         for (px, py, pixel) in imgbuf.enumerate_pixels_mut() {
-            let a = ((generated_noise[px as usize][py as usize] + 1.0) * 0.5 * 255.0) as u8;
+            let a = ((generated_noise[px as usize][py as usize] + 1.0) * 0.5) as f32;
             *pixel = image::Rgb([a, a, a]);
         }
         imgbuf
