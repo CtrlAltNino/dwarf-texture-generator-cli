@@ -102,22 +102,22 @@ fn main() {
 
     // let t = composition::color_gradient3();
 
-    let tttt = vec![
-        image::Rgb([0.0, 0.0, 0.0]),
-        image::Rgb([0.0, 0.0, 0.0]),
-        image::Rgb([1.0, 0.0, 0.0]),
-        image::Rgb([1.0, 1.0, 0.0]),
-        image::Rgb([1.0, 1.0, 1.0]),
-        image::Rgb([0.647, 0.0, 0.969]),
-    ];
-
-    let t = composition::build_gradient(&tttt);
-
-    for (px, py, pixel) in image.enumerate_pixels_mut() {
-        let image::Rgb([d, _, _]) = *pixel;
-        *pixel = t(d);
-    }
-
+    // let tttt = vec![
+    //     image::Rgb([0.0, 0.0, 0.0]),
+    //     image::Rgb([0.0, 0.0, 0.0]),
+    //     image::Rgb([1.0, 0.0, 0.0]),
+    //     image::Rgb([1.0, 1.0, 0.0]),
+    //     image::Rgb([1.0, 1.0, 1.0]),
+    //     image::Rgb([0.647, 0.0, 0.969]),
+    // ];
+    //
+    // let t = composition::build_gradient(&tttt);
+    //
+    // for (px, py, pixel) in image.enumerate_pixels_mut() {
+    //     let image::Rgb([d, _, _]) = *pixel;
+    //     *pixel = t(d);
+    // }
+    //
     let u8image: image::RgbImage = image.convert();
 
     if args.out.stdout {

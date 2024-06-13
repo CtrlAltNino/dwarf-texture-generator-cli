@@ -9,3 +9,4 @@ clap-num = "1.1.1"
 image = "0.25.1"
 mlua = { version = "0.9.7", features = ["lua54", "vendored"] }
 rand = { version = "0.8.5", features = ["small_rng"] }
+nalgebra = "0.29"
