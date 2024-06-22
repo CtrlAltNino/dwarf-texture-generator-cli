@@ -1,13 +1,19 @@
 use clap::Args;
+extern crate hilbert;
 extern crate nalgebra as na;
 extern crate rand;
 
-use std::fmt;
-
 use crate::algorithms::Noise;
-use core::panic;
-use na::{Point2, Vector2};
+use core::{f64, panic};
+use hilbert::point as hpoint;
+use na::{Const, OPoint, Point, Point2, Vector2};
 use rand::Rng;
+use std::cmp::Ordering;
+use std::collections::BTreeSet;
+use std::fmt;
+use std::hash::{Hash, Hasher};
+use std::io::Write;
+use std::time::Instant;
 use std::{
     borrow::Borrow,
     cell::RefCell,
@@ -145,6 +151,24 @@ impl Triangle {
         det > 0.0
     }
 }
+
+impl Hash for Triangle {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let [p1, p2, p3] = self.vertices;
+        Hash::hash(
+            &[
+                p1.x as u64,
+                p1.y as u64,
+                p2.x as u64,
+                p2.y as u64,
+                p3.x as u64,
+                p3.y as u64,
+            ],
+            state,
+        );
+    }
+}
+
 impl fmt::Display for Edge {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "({}<->{})", self.start, self.end)
@@ -173,35 +197,87 @@ impl PartialEq for Edge {
     }
 }
 
+impl Eq for Triangle {}
+
+impl PartialOrd for Triangle {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.vertices.partial_cmp(&other.vertices)
+    }
+}
+
+impl Ord for Triangle {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let Triangle {
+            vertices: [p1, p2, p3],
+            ..
+        } = self;
+        let Triangle {
+            vertices: [q1, q2, q3],
+            ..
+        } = other;
+
+        fn my_cmp(p: &Point2<f64>, q: &Point2<f64>) -> std::cmp::Ordering {
+            match f64::total_cmp(&p.x, &q.x) {
+                r @ Ordering::Less | r @ Ordering::Greater => r,
+                Ordering::Equal => f64::total_cmp(&p.y, &q.y),
+            }
+        }
+
+        match my_cmp(&p1, &q1) {
+            r @ Ordering::Less | r @ Ordering::Greater => r,
+            Ordering::Equal => match my_cmp(&p2, &q2) {
+                r @ Ordering::Less | r @ Ordering::Greater => r,
+                Ordering::Equal => my_cmp(&p2, &q2),
+            },
+        }
+    }
+}
+
 impl PartialEq for Triangle {
     fn eq(&self, other: &Self) -> bool {
         self.vertices.iter().all(|v| other.vertices.contains(v))
     }
 }
 
-fn add_neighbours(triangles: &Vec<Rc<Triangle>>, new_triangle: &Rc<Triangle>) {
+fn add_neighbours<'a, I>(triangles: I, new_triangle: &Rc<Triangle>)
+where
+    I: IntoIterator<Item = &'a Rc<Triangle>>,
+{
     for t in triangles {
-        new_triangle.update_neighbourhood(t);
+        new_triangle.update_neighbourhood(&t);
     }
 }
 
-fn get_region(start: &Rc<Triangle>, point: &Point2<f64>) -> Vec<Weak<Triangle>> {
-    let mut res = vec![Rc::downgrade(start)];
+fn print_progress(p: usize, q: usize) {
+    let a = 50;
+    let b = (p * a) / q;
+    let s = "█".repeat(b);
+    let t = "░".repeat(a - b);
 
-    fn inner(si: &Rc<Triangle>, p: &Point2<f64>, r: &mut Vec<Weak<Triangle>>) {
+    eprint!("\r{}{} {}/{}", s, t, p, q);
+    std::io::stderr().flush().unwrap();
+}
+
+fn get_region(start: &Rc<Triangle>, point: &Point2<f64>, bad_triangles: &mut Vec<Rc<Triangle>>) {
+    // let mut res = vec![Rc::clone(start)];
+    bad_triangles.push(Rc::clone(start));
+
+    fn inner(si: &Rc<Triangle>, p: &Point2<f64>, r: &mut Vec<Rc<Triangle>>) {
         si.checked.replace(true);
         for neighbour_weak_ref in si.neighbours.borrow().iter() {
             if let Some(n_ref) = neighbour_weak_ref.upgrade() {
                 if !*n_ref.checked.borrow() && n_ref.circumcircle_contains(p) {
-                    r.push(Rc::downgrade(&n_ref));
+                    r.push(Rc::clone(&n_ref));
                     inner(&n_ref, p, r);
                 }
             }
         }
     }
+    inner(start, point, bad_triangles);
 
-    inner(start, point, &mut res);
-    res
+    for r in bad_triangles {
+        r.checked.replace(false);
+    }
 }
 
 fn get_relation(t1: &Rc<Triangle>, t2: &Rc<Triangle>) -> Option<(u8, u8)> {
@@ -232,7 +308,20 @@ fn get_polygon_edge(triangle: &Rc<Triangle>, triangles: &Vec<Rc<Triangle>>) -> O
     None
 }
 
+#[derive(Debug)]
+struct Triangles {
+    triangles: Vec<(Rc<Triangle>, u32)>,
+}
+
 fn bowyer_watson(x: u32, y: u32, points: Vec<Point2<f64>>) -> Vec<Rc<Triangle>> {
+    let s = points.len() * 2 - 2;
+
+    // let mut triangles: BTreeSet<Rc<Triangle>> = BTreeSet::new();
+    // let mut triangles: HashSet<Rc<Triangle>> = HashSet::with_capacity(s);
+    let mut triangles: Vec<Rc<Triangle>> = Vec::with_capacity(s);
+    let mut bad_triangles = Vec::with_capacity(s);
+    let mut polygon = Vec::with_capacity(s);
+
     let super_triangle = Triangle::new(
         Point2::new(-4.0 * x as f64, -4.0 * x as f64),
         Point2::new(4.0 * x as f64, -4.0 * x as f64),
@@ -242,39 +331,32 @@ fn bowyer_watson(x: u32, y: u32, points: Vec<Point2<f64>>) -> Vec<Rc<Triangle>> 
     let super_triangle_vertices = super_triangle.vertices;
 
     let mut triangles = vec![Rc::new(super_triangle)];
-    let mut recently_added: Vec<Triangle> = vec![];
+    // triangles.insert(Rc::new(super_triangle));
 
-    for point in points {
-        let mut bad_triangles_weak = Vec::new();
-        for (i, triangle) in triangles.iter().enumerate() {
+    let input_pts: Vec<[f64; 2]> = points.iter().map(|p| [p.x, p.y]).collect();
+    let (mut pts, bits) = hilbert::point_list::make_points_f64(&input_pts, 0, None, None, 10.0);
+    hpoint::Point::hilbert_sort(&mut pts, bits);
+
+    let sorted_pts: Vec<Point2<f64>> = pts
+        .iter()
+        .map(|p| {
+            let [x, y] = p.get_coordinates()[..] else {
+                unimplemented!();
+            };
+            Point2::new(x as f64 / 10.0, y as f64 / 10.0)
+        })
+        .collect();
+
+    // let mut bad_triangles = Vec::new();
+    for (point_index, point) in sorted_pts.iter().enumerate() {
+        for triangle in triangles.iter().rev() {
             if triangle.circumcircle_contains(&point) {
-                bad_triangles_weak = get_region(triangle, &point);
-                eprintln!("Found bad triangle after {}", i);
+                get_region(triangle, &point, &mut bad_triangles);
+                // eprintln!("Found bad triangle after {}", i);
 
                 break;
             }
         }
-
-        for neighbour_weak_ref in &bad_triangles_weak {
-            if let Some(n_ref) = neighbour_weak_ref.upgrade() {
-                n_ref.checked.replace(false);
-            } else {
-                panic!("asdjfkasjdfas  aaaaaaaaaaaaaaaaaaaaaaaaa");
-            }
-        }
-        // eprintln!("bad triangles{:}", bad_triangles_weak.len());
-
-        let mut bad_triangles = Vec::new();
-
-        for t_weak in bad_triangles_weak {
-            if let Some(r) = t_weak.upgrade() {
-                bad_triangles.push(r);
-            } else {
-                panic!("asdfasdfasdfasdf");
-            }
-        }
-
-        let mut polygon = Vec::new();
 
         for triangle in &bad_triangles {
             for (edge_index, edge) in triangle.edges.iter().enumerate() {
@@ -292,26 +374,26 @@ fn bowyer_watson(x: u32, y: u32, points: Vec<Point2<f64>>) -> Vec<Rc<Triangle>> 
             }
         }
 
-        triangles.retain(|t| {
-            if bad_triangles.contains(t) {
-                t.say_goodbye();
-                // eprintln!("saying good bye");
-                false
-            } else {
-                // eprintln!("staying");
-                true
-            }
-        });
+        for t in &bad_triangles {
+            t.say_goodbye();
+            triangles.remove(t);
+        }
 
-        for (edge_trian, edge) in polygon {
-            let trian = Rc::new(Triangle::new(edge.start, edge.end, point));
+        for (edge_trian, edge) in &polygon {
+            let trian = Rc::new(Triangle::new(edge.start, edge.end, *point));
             add_neighbours(&triangles, &trian);
             if let Some(et) = edge_trian {
                 // eprintln!("triangle at poly edge");
                 trian.update_neighbourhood(&et);
             }
-            triangles.push(trian);
+            // triangles.push(trian);
+            triangles.insert(trian);
         }
+
+        bad_triangles.clear();
+        polygon.clear();
+
+        print_progress(point_index + 1, points.len());
     }
 
     triangles.retain(|t| {
@@ -320,18 +402,22 @@ fn bowyer_watson(x: u32, y: u32, points: Vec<Point2<f64>>) -> Vec<Rc<Triangle>> 
             && !super_triangle_vertices.contains(&t.vertices[2])
     });
 
-    triangles
+    // triangles
+    triangles.iter().cloned().collect()
 }
 
 fn generate_voronoi(x: u32, y: u32) -> image::ImageBuffer<image::Rgb<f32>, Vec<f32>> {
     let mut imgbuf = image::ImageBuffer::new(x, y);
 
     let mut rng = rand::thread_rng();
-    let points: Vec<Point2<f64>> = (0..250)
+    let points: Vec<Point2<f64>> = (0..1000)
         .map(|_| Point2::new(rng.gen_range(0.0..x as f64), rng.gen_range(0.0..y as f64)))
         .collect();
 
+    let start = Instant::now();
     let triangles = bowyer_watson(x, y, points);
+
+    eprint!("Bowyer watson took: {:?}", start.elapsed());
     for (_px, _py, pixel) in imgbuf.enumerate_pixels_mut() {
         *pixel = image::Rgb([0.5, 0.0, 0.0]);
     }
@@ -395,6 +481,8 @@ impl Noise for Voronoi {
 
 #[cfg(test)]
 mod tests {
+
+    use hilbert::point_list;
 
     use super::*;
 
@@ -462,6 +550,28 @@ mod tests {
             } else {
                 self::panic!("AAAAAAAA");
             }
+        }
+    }
+    #[test]
+    fn test_hilbert() {
+        let point_list = vec![
+            Point2::new(3.0, 0.0),
+            Point2::new(7.0, 0.0),
+            Point2::new(8.0, 3.0),
+            Point2::new(5.0, 5.0),
+            Point2::new(2.0, 3.0),
+            Point2::new(5.0, 2.0),
+        ];
+
+        let pts: Vec<[f64; 2]> = point_list.iter().map(|p| [p.x, p.y]).collect();
+        let (mut points, bits) = hilbert::point_list::make_points_f64(&pts, 0, None, None, 10.0);
+        print!("hilbert points 1==== {:?}", points);
+        hpoint::Point::hilbert_sort(&mut points, bits);
+        print!("hilbert points 2===={:?}", points);
+
+        for p in &points {
+            println!("hilbert point?????{:?}", p.hilbert_transform(bits));
+            println!("hilbert point?????{:?}", p.get_coordinates());
         }
     }
 }
