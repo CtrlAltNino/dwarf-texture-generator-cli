@@ -57,6 +57,7 @@ pub fn spit_to_stdout(
     let mut cursor = Cursor::new(Vec::new());
 
     image.write_to(&mut cursor, iformat).unwrap();
+
     //TODO gracefully terminate here
     io::stdout().write_all(&cursor.into_inner()).unwrap();
     io::stdout().flush().unwrap();

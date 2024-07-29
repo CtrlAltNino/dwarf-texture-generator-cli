@@ -11,6 +11,8 @@ use image::buffer::ConvertBuffer;
 use image::ImageError;
 use image::ImageFormat;
 
+mod rector;
+
 mod composition;
 mod luatryout;
 mod output;
