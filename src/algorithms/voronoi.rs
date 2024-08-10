@@ -2,7 +2,7 @@ use clap::Args;
 extern crate hilbert;
 extern crate nalgebra as na;
 extern crate rand;
-use delaunator;
+use delaunator::{self, next_halfedge, prev_halfedge};
 
 use crate::algorithms::Noise;
 
@@ -342,12 +342,31 @@ struct Triangles {
     triangles: Vec<Triangle>,
 }
 
-fn scanline_fill<F>(vertices: &[delaunator::Point], mut draw_pixel: F)
+fn draw_points<F>(vertices: &[Rector], r: u32, mut draw_pixel: F)
 where
     F: FnMut(u32, u32),
 {
-    let mut edges: Vec<(delaunator::Point, delaunator::Point)> = Vec::new();
+    let sr = r as i32;
+    for v in vertices {
+        for i in -sr..=sr {
+            for j in -sr..=sr {
+                if i.pow(2) + j.pow(2) <= sr.pow(2) {
+                    draw_pixel((i as f64 + v.x) as u32, (j as f64 + v.y) as u32);
+                }
+            }
+        }
+    }
+}
+
+fn scanline_fill<F>(vertices: &[Rector], mut draw_pixel: F)
+where
+    F: FnMut(u32, u32),
+{
+    let mut edges: Vec<(Rector, Rector)> = Vec::new();
     let num_vertices = vertices.len();
+    if num_vertices == 0 {
+        return;
+    }
 
     // Create the edge list
     for i in 0..num_vertices {
@@ -452,21 +471,28 @@ fn scale_center(
         .collect()
 }
 
-fn scale_floody(vertices: &[delaunator::Point], distance: f64) -> Vec<delaunator::Point> {
+fn rotate_inwards(v: Rector) -> Rector {
+    Rector { x: -v.y, y: v.x }
+}
+
+fn scale_offset(vertices: &[Rector], distance: f64) -> Vec<Rector> {
     let n = vertices.len();
     let mut out = Vec::with_capacity(n);
+
+    let mut directions = Vec::with_capacity(n);
+    let mut angles = Vec::with_capacity(n);
+    let mut move_distances = Vec::with_capacity(n);
+    let mut side_lengths = Vec::with_capacity(n);
+
     for i in 0..n {
-        let x0 = Rector::from(&vertices[i]);
-        let xn = Rector::from(&vertices[(i + 1) % n]);
-        let xp = Rector::from(&vertices[if i == 0 { n - 1 } else { i - 1 }]);
+        let x0 = vertices[i];
+        let xn = vertices[(i + 1) % n];
+        let xp = vertices[if i == 0 { n - 1 } else { i - 1 }];
 
         let vp = xp - x0;
-        let vp = vp / vp.norm();
-
         let vn = xn - x0;
-        let vn = vn / vn.norm();
 
-        let nor = vp - vn;
+        let nor = vp.normalize() - vn.normalize();
         let nor = nor / nor.norm();
 
         let nor = Rector {
@@ -474,20 +500,61 @@ fn scale_floody(vertices: &[delaunator::Point], distance: f64) -> Vec<delaunator
             y: nor.x,
         };
 
-        let coss = vp * nor;
+        directions.push(nor);
+
+        let coss = vp.normalize() * nor;
         let sinn = (1.0 - coss.powi(2)).sqrt();
+        let angle = coss.acos();
 
-        let (a, b, c) = (vp.norm(), vn.norm(), (xn - xp).norm());
-        let incenter = (xp * a + x0 * b + xn * c) / (a + b + c);
-        let d2in = (incenter - x0).norm();
+        angles.push(angle);
+        let side_length = vn.norm();
+        // if side_length <= 2.0 * f64::EPSILON {
+        //     eprint!("IN SIMILAR POTS");
+        //     let i_removed: Vec<Rector> = vertices
+        //         .iter()
+        //         .enumerate()
+        //         .filter_map(|(j, &e)| if j == i { None } else { Some(e) })
+        //         .collect();
+        //
+        //     return scale_offset(&i_removed, distance);
+        // }
+        side_lengths.push(side_length);
 
-        let s = d2in.min(distance / sinn);
-
-        let outv = x0 + nor * s;
-
-        out.push(delaunator::Point::from(outv));
+        move_distances.push(distance / sinn);
     }
-    out
+
+    let mut smallest_offset_to_delete_a_point = None;
+    for i in 0..n {
+        let a0 = angles[i];
+        let an = angles[(i + 1) % n];
+
+        let max_move_before_delete =
+            (a0.sin() * side_lengths[i]) / (std::f64::consts::PI - a0 - an).sin();
+
+        if move_distances[(i + 1) % n] >= max_move_before_delete {
+            let max_offset = an.sin() * max_move_before_delete;
+
+            if !smallest_offset_to_delete_a_point.is_some_and(|(_, offset)| offset < max_offset) {
+                smallest_offset_to_delete_a_point = Some(((i + 1) % n, max_offset));
+            }
+        }
+    }
+
+    //Either: offset, until one point has to be deleted and recurse, or just offset every point
+    //without recursion
+    if let Some((index_to_delete, offset)) = smallest_offset_to_delete_a_point {
+        for i in 0..n {
+            if i != index_to_delete {
+                out.push(vertices[i] + directions[i] * offset / angles[i].sin());
+            }
+        }
+        scale_offset(&out, distance - offset)
+    } else {
+        for i in 0..n {
+            out.push(vertices[i] + directions[i] * distance / angles[i].sin());
+        }
+        out
+    }
 }
 
 fn bowyer_watson(x: u32, y: u32, points: Vec<Point2<f64>>) -> Vec<Rc<Triangle>> {
@@ -591,86 +658,149 @@ fn generate_voronoi(x: u32, y: u32) -> image::ImageBuffer<image::Rgb<f32>, Vec<f
     //     .map(|_| Point2::new(rng.gen_range(0.0..x as f64), rng.gen_range(0.0..y as f64)))
     //     .collect();
 
-    let points: Vec<delaunator::Point> = (0..1000)
+    let points: Vec<delaunator::Point> = (0..100)
         .map(|_| delaunator::Point {
             x: rng.gen_range(0.0..x as f64),
             y: rng.gen_range(0.0..y as f64),
         })
         .collect();
 
-    let start = Instant::now();
-    // let triangles = bowyer_watson(x, y, points);
     let result = delaunator::triangulate(&points);
 
-    eprint!("Bowyer watson took: {:?}", start.elapsed());
-    for (_px, _py, pixel) in imgbuf.enumerate_pixels_mut() {
-        *pixel = image::Rgb([0.5, 0.0, 0.0]);
-    }
+    let voro = to_voronoi(result, &points);
 
-    for (i, triangle) in result.triangles.chunks(3).enumerate() {
-        // eprintln!("--------------------------------------------------");
-        // eprintln!("Triangle: {:?}", triangle);
-        // for (j, n) in triangle.neighbours.borrow().iter().enumerate() {
-        //     if let Some(nu) = n.upgrade() {
-        //         eprintln!("===================");
-        //         eprintln!("nachbar{:}: {:?}", j, nu);
-        //     }
-        // }
+    let mut i = 0;
 
-        let [i1, i2, i3] = triangle else {
-            unimplemented!();
+    // let pts: [(f64, f64); 5] = [
+    //     (-80.0, 60.0),
+    //     (160.0, -70.0),
+    //     (800.0, 80.0),
+    //     (80.0, 760.0),
+    //     (-100.0, 120.0),
+    // ];
+    //
+    // let rpts: Vec<Rector> = pts
+    //     .into_iter()
+    //     .rev()
+    //     .map(|(x, y)| Rector {
+    //         x: x + 500.0,
+    //         y: y + 500.0,
+    //     })
+    //     .collect();
+    //
+    // scanline_fill(&rpts, |a, b| {
+    //     imgbuf.put_pixel(a.min(x - 1), b.min(y - 1), image::Rgb([0.5, 0.3, 0.1]))
+    // });
+    //
+    // let pts_scaled = scale_offset(&rpts, 280.0);
+    //
+    // scanline_fill(&pts_scaled, |a, b| {
+    //     imgbuf.put_pixel(a.min(x - 1), b.min(y - 1), image::Rgb([0.1, 0.3, 0.8]))
+    // });
+
+    for l in voro.caesures {
+        let poly_tmp = &voro.vertices[i..(i + l)];
+        let mut poly = Vec::with_capacity(l);
+        for j in poly_tmp {
+            poly.push(voro.points[*j]);
+        }
+
+        let coords_to_color = |p: &Rector, x_or_y: bool| {
+            if x_or_y {
+                p.x as f32 / x as f32
+            } else {
+                p.y as f32 / y as f32
+            }
         };
-        let t = [
-            points[*i1].clone(),
-            points[*i2].clone(),
-            points[*i3].clone(),
-        ];
-        // let min_x = t.iter().map(|v| v.x).fold(f64::INFINITY, f64::min).floor() as u32;
-        // let max_x = t
-        //     .iter()
-        //     .map(|v| v.x)
-        //     .fold(f64::NEG_INFINITY, f64::max)
-        //     .ceil() as u32;
-        // let min_y = t.iter().map(|v| v.y).fold(f64::INFINITY, f64::min).floor() as u32;
-        // let max_y = t
-        //     .iter()
-        //     .map(|v| v.y)
-        //     .fold(f64::NEG_INFINITY, f64::max)
-        //     .ceil() as u32;
-        // let c = i as f32 / 10.0;
-        //
 
-        let temp_triangle = Triangle::new(
-            Point2::new(t[0].x, t[0].y),
-            Point2::new(t[1].x, t[1].y),
-            Point2::new(t[2].x, t[2].y),
-        );
+        let c1 = coords_to_color(&poly[0], true);
+        let c2 = coords_to_color(&poly[0], false);
 
-        let c1 = temp_triangle.circumcenter.x as f32 / x as f32;
-        let c2 = temp_triangle.circumcenter.y as f32 / y as f32;
-        let c3 = smallest_angle((t[0].x, t[0].y), (t[1].x, t[1].y), (t[2].x, t[2].y));
-
-        let edge_width = (1.0 - c1) * (1.0 - c2) * 10.0;
-        let edge_width = edge_width.clamp(0.0, 10.0);
-        let t2 = scale_floody(&t, edge_width as f64);
+        let t2 = scale_offset(&poly, 1.4);
 
         scanline_fill(&t2, |a, b| {
             imgbuf.put_pixel(
-                a.min(x),
-                b.min(y),
-                image::Rgb([c1, c2, 1.0 - c3 as f32 * 3.0 / 3.2]),
+                a.clamp(0, x - 1),
+                b.clamp(0, y - 1),
+                image::Rgb([c1, c2, c1]),
             )
         });
 
-        // for x in min_x..=max_x {
-        //     for y in min_y..=max_y {
-        //         let point = Point2::new(x as f64, y as f64);
-        //         if temp_triangle.contains_point(&point) {
-        //             imgbuf.put_pixel(x, y, image::Rgb([c1, c2, 1.0 - c3 as f32 * 3.0 / 3.2]));
-        //         }
-        //     }
-        // }
+        i += l;
     }
+
+    // draw_points(&voro.points, 3, |a, b| {
+    //     imgbuf.put_pixel(a.min(x - 1), b.min(y - 1), image::Rgb([0.0, 1.0, 1.0]))
+    // });
+    //
+    // draw_points(&voro.centers, 3, |a, b| {
+    //     imgbuf.put_pixel(a.min(x - 1), b.min(y - 1), image::Rgb([0.0, 0.0, 1.0]))
+    // });
+
+    // for (i, triangle) in result.triangles.chunks(3).enumerate() {
+    //     // eprintln!("--------------------------------------------------");
+    //     // eprintln!("Triangle: {:?}", triangle);
+    //     // for (j, n) in triangle.neighbours.borrow().iter().enumerate() {
+    //     //     if let Some(nu) = n.upgrade() {
+    //     //         eprintln!("===================");
+    //     //         eprintln!("nachbar{:}: {:?}", j, nu);
+    //     //     }
+    //     // }
+    //
+    //     let [i1, i2, i3] = triangle else {
+    //         unimplemented!();
+    //     };
+    //     let t = [
+    //         points[*i1].clone(),
+    //         points[*i2].clone(),
+    //         points[*i3].clone(),
+    //     ];
+    //     // let min_x = t.iter().map(|v| v.x).fold(f64::INFINITY, f64::min).floor() as u32;
+    //     // let max_x = t
+    //     //     .iter()
+    //     //     .map(|v| v.x)
+    //     //     .fold(f64::NEG_INFINITY, f64::max)
+    //     //     .ceil() as u32;
+    //     // let min_y = t.iter().map(|v| v.y).fold(f64::INFINITY, f64::min).floor() as u32;
+    //     // let max_y = t
+    //     //     .iter()
+    //     //     .map(|v| v.y)
+    //     //     .fold(f64::NEG_INFINITY, f64::max)
+    //     //     .ceil() as u32;
+    //     // let c = i as f32 / 10.0;
+    //     //
+    //
+    //     let temp_triangle = Triangle::new(
+    //         Point2::new(t[0].x, t[0].y),
+    //         Point2::new(t[1].x, t[1].y),
+    //         Point2::new(t[2].x, t[2].y),
+    //     );
+    //
+    //     let c1 = temp_triangle.circumcenter.x as f32 / x as f32;
+    //     let c2 = temp_triangle.circumcenter.y as f32 / y as f32;
+    //     let c3 = smallest_angle((t[0].x, t[0].y), (t[1].x, t[1].y), (t[2].x, t[2].y));
+    //
+    //     let edge_width = (1.0 - c1) * (1.0 - c2) * 10.0;
+    //     let edge_width = edge_width.clamp(0.0, 10.0);
+    //     let t2 = scale_floody(&t, edge_width as f64);
+    //
+    //     scanline_fill(&t2, |a, b| {
+    //         imgbuf.put_pixel(
+    //             a.min(x),
+    //             b.min(y),
+    //             image::Rgb([c1, c2, 1.0 - c3 as f32 * 3.0 / 3.2]),
+    //         )
+    //     });
+    //
+    //     // for x in min_x..=max_x {
+    //     //     for y in min_y..=max_y {
+    //     //         let point = Point2::new(x as f64, y as f64);
+    //     //         if temp_triangle.contains_point(&point) {
+    //     //             imgbuf.put_pixel(x, y, image::Rgb([c1, c2, 1.0 - c3 as f32 * 3.0 / 3.2]));
+    //     //         }
+    //     //     }
+    //     // }
+    // }
 
     imgbuf
 }
@@ -685,27 +815,98 @@ struct PolygonSet {
     vertices: Vec<usize>,
     caesures: Vec<usize>,
     halfedges: Vec<usize>,
+    points: Vec<Rector>,
+    centers: Vec<Rector>,
 }
 
-fn to_voronoi(triangulation: delaunator::Triangulation) -> PolygonSet {
+fn get_circumcenter(pts: &[delaunator::Point], t: &[usize]) -> Rector {
+    let (p1, p2, p3) = (&pts[t[0]], &pts[t[1]], &pts[t[2]]);
+
+    let d = 2.0 * (p1.x * (p2.y - p3.y) + p2.x * (p3.y - p1.y) + p3.x * (p1.y - p2.y));
+    let ux = ((p1.x * p1.x + p1.y * p1.y) * (p2.y - p3.y)
+        + (p2.x * p2.x + p2.y * p2.y) * (p3.y - p1.y)
+        + (p3.x * p3.x + p3.y * p3.y) * (p1.y - p2.y))
+        / d;
+    let uy = ((p1.x * p1.x + p1.y * p1.y) * (p3.x - p2.x)
+        + (p2.x * p2.x + p2.y * p2.y) * (p1.x - p3.x)
+        + (p3.x * p3.x + p3.y * p3.y) * (p2.x - p1.x))
+        / d;
+    Rector { x: ux, y: uy }
+}
+
+fn to_voronoi(triangulation: delaunator::Triangulation, pts: &[delaunator::Point]) -> PolygonSet {
     let delaunator::Triangulation {
         triangles,
         halfedges,
         ..
     } = triangulation;
 
-    let mut pts_to_triangle = Vec::with_capacity(triangles.len());
+    let mut pts_to_triangle_tmp: Vec<usize> = vec![delaunator::EMPTY; triangles.len()];
+
     for (i, p) in triangles.iter().enumerate() {
-        if pts_to_triangle[*p] != 0 {
-            pts_to_triangle[*p] = i;
+        if pts_to_triangle_tmp[*p] == delaunator::EMPTY {
+            pts_to_triangle_tmp[*p] = i;
         }
     }
 
-    for (i, pt) in pts_to_triangle.iter().enumerate() {
-        while true {
-            temp_triangle = 
+    let pts_to_triangle: Vec<usize> = pts_to_triangle_tmp
+        .into_iter()
+        .filter(|&x| x != delaunator::EMPTY)
+        .collect();
+
+    let mut ps = PolygonSet {
+        vertices: Vec::new(),
+        caesures: Vec::new(),
+        halfedges: Vec::new(),
+        points: Vec::new(),
+        centers: Vec::new(),
+    };
+
+    let mut points_added: Vec<usize> = vec![delaunator::EMPTY; triangles.len()];
+
+    for (pt, edge_index) in pts_to_triangle.iter().enumerate() {
+        let mut triangle_edge = *edge_index;
+
+        let mut triangle_edges = Vec::new();
+
+        let mut add_triangle = |ei| {
+            let tstart = ei / 3 * 3;
+            let t = &triangles[tstart..(tstart + 3)];
+            ps.vertices.push(match points_added[tstart] {
+                delaunator::EMPTY => {
+                    ps.points.push(get_circumcenter(&pts, t));
+                    let cp = ps.points.len() - 1;
+                    points_added[tstart] = cp;
+                    cp
+                }
+                cp => cp,
+            });
+        };
+
+        let fully_contained = loop {
+            if triangles[triangle_edge] == pt {
+                triangle_edge = prev_halfedge(triangle_edge);
+            } else {
+                triangle_edge = next_halfedge(triangle_edge);
+            }
+            triangle_edge = halfedges[triangle_edge];
+
+            triangle_edges.push(triangle_edge);
+            if triangle_edge == *edge_index {
+                break true;
+            } else if triangle_edge == delaunator::EMPTY {
+                break false;
+            }
+        };
+
+        if fully_contained {
+            for te in &triangle_edges {
+                add_triangle(te);
+            }
+            ps.caesures.push(triangle_edges.len());
         }
     }
+    ps
 }
 
 #[cfg(test)]
